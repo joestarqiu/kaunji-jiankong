@@ -1,0 +1,10 @@
+{
+  "indexes": {
+    "中证红利（000922.SH）": {"buy_stage": 0, "sell_stage": 0},
+    "沪深300（000300.SH）": {"buy_stage": 0, "sell_stage": 0},
+    "中证A500（000510.SH）": {"buy_stage": 0, "sell_stage": 0},
+    "中证500（000905.SH）": {"buy_stage": 0, "sell_stage": 0},
+    "中证港股通高股息（930914）": {"buy_stage": 0, "sell_stage": 0},
+    "中证红利低波动100（930955）": {"buy_stage": 0, "sell_stage": 0}
+  }
+}

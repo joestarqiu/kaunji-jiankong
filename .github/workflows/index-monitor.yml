@@ -1,0 +1,32 @@
+name: 六大指数买卖监控
+
+on:
+  schedule:
+    # 16:35 Asia/Shanghai = 08:35 UTC，工作日运行
+    - cron: '35 8 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 运行指数监控并发送飞书
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_RECIPIENT_OPEN_ID: ${{ secrets.FEISHU_RECIPIENT_OPEN_ID }}
+        run: python agent/scripts/daily_index_monitor.py
+      - name: 保存监控状态
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent/data/index_monitor_state.json
+          git diff --cached --quiet || git commit -m "chore: update index monitor state"
+          git push

@@ -48,6 +48,25 @@ def fetch(code: str) -> tuple[str, float, float, list[float]] | None:
         return None
 
 
+def fetch_yahoo(code: str) -> tuple[str, float, float, list[float]] | None:
+    """Fallback for CSI strategy indices that Eastmoney does not expose."""
+    symbol = f"{code}.SS"
+    req = Request(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d",
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    try:
+        with urlopen(req, timeout=20, context=ssl.create_default_context()) as response:
+            result = json.loads(response.read().decode("utf-8"))["chart"]["result"][0]
+        closes = [float(x) for x in result["indicators"]["quote"][0]["close"] if x is not None]
+        timestamps = result["timestamp"]
+        if len(closes) < 2 or not timestamps:
+            return None
+        return datetime.fromtimestamp(timestamps[-1]).date().isoformat(), closes[-1], (closes[-1] / closes[-2] - 1) * 100, closes
+    except Exception:
+        return None
+
+
 def load_state() -> dict:
     if STATE_PATH.exists():
         return json.loads(STATE_PATH.read_text(encoding="utf-8"))
@@ -71,7 +90,7 @@ def main() -> None:
     state = load_state(); lines = [f"【大A投研看板】指数买卖日报（{date.today()}）", ""]
     for name, (code, buys) in INDEXES.items():
         item = state["indexes"].setdefault(name, {"buy_stage": 0, "sell_stage": 0})
-        result = fetch(code)
+        result = fetch(code) or fetch_yahoo(code)
         stale = False
         if result:
             day, close, change, history = result
@@ -84,12 +103,34 @@ def main() -> None:
         q = sorted(history); n = len(q)
         p80, p90, p95 = (q[min(n - 1, int(n * p) - 1)] for p in (0.80, 0.90, 0.95)) if n else (None, None, None)
         buy_stage = item.get("buy_stage", 0)
-        if buy_stage < 3 and close <= buys[buy_stage]: item["buy_stage"] = buy_stage + 1
+        buy_triggered = None
+        if buy_stage < 3 and close <= buys[buy_stage]:
+            item["buy_stage"] = buy_stage + 1
+            buy_triggered = buy_stage + 1
         sell_stage = item.get("sell_stage", 0)
         sell_targets = [p80, p90, p95]
-        if sell_stage < 3 and sell_targets[sell_stage] is not None and close >= sell_targets[sell_stage]: item["sell_stage"] = sell_stage + 1
+        sell_triggered = None
+        if n >= 200 and sell_stage < 3 and sell_targets[sell_stage] is not None and close >= sell_targets[sell_stage]:
+            item["sell_stage"] = sell_stage + 1
+            sell_triggered = sell_stage + 1
         tag = f"（沿用{day}，非当日数据）" if stale else ""
-        lines += [name, f"数据日期：{day}{tag}", f"收盘：{close:.2f}点；涨跌幅：{'未知' if change is None else f'{change:+.2f}%'}", f"买入：第{min(item['buy_stage'] + 1, 3)}档目标 {buys[min(item['buy_stage'], 2)]:.2f}；卖出：第{min(item['sell_stage'] + 1, 3)}档，点位分位目标约 {sell_targets[min(item['sell_stage'], 2)]:.2f}", "",]
+        next_buy = buys[min(item["buy_stage"], 2)]
+        if buy_triggered:
+            buy_text = f"买入结论：达到第{buy_triggered}档，建议按计划买入。"
+        else:
+            buy_text = f"买入结论：暂不买入，等待第{min(item['buy_stage'] + 1, 3)}档 {next_buy:.2f}点。"
+        reductions = [20, 50, 80]
+        if sell_triggered:
+            sell_text = f"卖出结论：达到第{sell_triggered}档，建议累计减仓至{reductions[sell_triggered - 1]}%。"
+        elif n < 200:
+            sell_text = "卖出结论：暂不卖出（历史点位不足，暂不计算卖出分位）。"
+        elif item["sell_stage"] == 0:
+            sell_text = f"卖出结论：暂不卖出，继续持有观察；第1档约 {p80:.2f}点。"
+        elif item["sell_stage"] < 3:
+            sell_text = f"卖出结论：已完成第{item['sell_stage']}档减仓，当前等待第{item['sell_stage'] + 1}档约 {sell_targets[item['sell_stage']]:.2f}点。"
+        else:
+            sell_text = "卖出结论：三档减仓已完成，继续评估持仓。"
+        lines += [name, f"数据日期：{day}{tag}", f"收盘：{close:.2f}点；涨跌幅：{'未知' if change is None else f'{change:+.2f}%'}", buy_text, sell_text, "",]
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True); STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     message = "\n".join(lines)
     if os.getenv("MONITOR_DRY_RUN") == "1":

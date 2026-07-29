@@ -67,6 +67,40 @@ def fetch_yahoo(code: str) -> tuple[str, float, float, list[float]] | None:
         return None
 
 
+def fetch_lixinger(code: str) -> tuple[str, float, float, list[float]] | None:
+    """Use Lixinger as the primary fallback for CSI strategy indices."""
+    token = os.getenv("LIXINGER_TOKEN")
+    if not token or code not in {"930914", "930955"}:
+        return None
+    payload = {
+        "token": token,
+        "stockCodes": [code],
+        "startDate": (date.today() - timedelta(days=1100)).isoformat(),
+        "endDate": date.today().isoformat(),
+        "metricsList": ["cp", "cpc"],
+    }
+    req = Request(
+        "https://open.lixinger.com/api/cn/index/fundamental",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137.0.0.0 Safari/537.36",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+        },
+    )
+    try:
+        with urlopen(req, timeout=25, context=ssl.create_default_context()) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        rows = sorted(body.get("data") or [], key=lambda item: item["date"])
+        closes = [float(row["cp"]) for row in rows if row.get("cp") is not None]
+        latest = rows[-1]
+        if len(closes) < 2 or latest.get("cp") is None:
+            return None
+        return latest["date"][:10], float(latest["cp"]), float(latest.get("cpc") or 0) * 100, closes
+    except Exception:
+        return None
+
+
 def load_state() -> dict:
     if STATE_PATH.exists():
         return json.loads(STATE_PATH.read_text(encoding="utf-8"))
@@ -90,7 +124,7 @@ def main() -> None:
     state = load_state(); lines = [f"【大A投研看板】指数买卖日报（{date.today()}）", ""]
     for name, (code, buys) in INDEXES.items():
         item = state["indexes"].setdefault(name, {"buy_stage": 0, "sell_stage": 0})
-        result = fetch(code) or fetch_yahoo(code)
+        result = fetch(code) or fetch_lixinger(code) or fetch_yahoo(code)
         stale = False
         if result:
             day, close, change, history = result

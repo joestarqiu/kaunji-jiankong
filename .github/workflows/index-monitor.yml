@@ -22,6 +22,7 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_RECIPIENT_OPEN_ID: ${{ secrets.FEISHU_RECIPIENT_OPEN_ID }}
+          LIXINGER_TOKEN: ${{ secrets.LIXINGER_TOKEN }}
         run: python agent/scripts/daily_index_monitor.py
       - name: 保存监控状态
         run: |
